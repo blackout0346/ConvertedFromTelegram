@@ -1,11 +1,11 @@
 
 import config
-import aspose.words as aw
+from PIL import Image
 import telebot
 from telebot import types
 from io import BytesIO
 import uuid
-from telebot.apihelper import download_file
+
 
 
 bot = telebot.TeleBot(config.API_KEY)
@@ -26,7 +26,7 @@ def get_image_messages(message):
     user_images[image_id] = downloaded_file
 
     keyboard = types.InlineKeyboardMarkup()
-    for fmt in ['png', 'jpg', 'webp', 'emf', 'tiff', 'bmp']:
+    for fmt in ['png', 'jpeg', 'webp', 'pdf','ico','tga','ppm','xbm', 'tiff', 'bmp']:
         keyboard.add(types.InlineKeyboardButton(text = fmt, callback_data=f'{fmt}:{image_id}'))
     bot.send_message(message.chat.id, "В какой формат конвертировать изображение?", reply_markup=keyboard)
     print(f"[DEBUG] Сохраняем image_id: {image_id}")
@@ -42,34 +42,18 @@ def convert_image(call):
 
     image_data = user_images.get(image_id)
 
-    # with open(f"debug_{fmt}_{image_id}.jpg", "wb") as f:
-    #     f.write(image_data)
-
     if not image_data:
         bot.send_message(call.message.chat.id, "Сначала отправь изображение.")
         return
-
-    doc = aw.Document()
-    builder = aw.DocumentBuilder(doc)
     image_stream = BytesIO(image_data)
-    shape = builder.insert_image(image_stream)
-
+    img = Image.open(image_stream).convert("RGB")
     output_stream = BytesIO()
-    image_format = {
-        "jpg": aw.SaveFormat.JPEG,
-        "png": aw.SaveFormat.PNG,
-        "webp": aw.SaveFormat.WEB_P,
-        "tiff": aw.SaveFormat.TIFF,
-        "emf": aw.SaveFormat.EMF,
-        "bmp": aw.SaveFormat.BMP,
-    }[fmt]
 
-
-    shape.get_shape_renderer().save(output_stream, aw.saving.ImageSaveOptions(image_format))
+    img.save(output_stream , format=fmt.upper())
     output_stream.seek(0)
-
-    bot.send_document(call.message.chat.id, output_stream, visible_file_name=f'converted.{fmt}')
+    bot.send_document(call.message.chat.id, output_stream , visible_file_name=f"converted.{fmt}")
     bot.send_message(call.message.chat.id, "Вот твоё изображение!")
+
     print(f"[DEBUG] Обрабатываем callback: {fmt=} {image_id=}")
     del user_images[image_id]
 

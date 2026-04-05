@@ -1,3 +1,5 @@
+from urllib.request import UnknownHandler
+
 import config
 from PIL import Image
 import telebot
@@ -5,16 +7,23 @@ from telebot import types
 from io import BytesIO
 import uuid
 import os
-from pydub import AudioSegment
 import speech_recognition as sr
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FFMPEG_DIR = os.path.join(BASE_DIR, 'ffmpeg')
+ffmpeg_path = os.path.join(FFMPEG_DIR, 'ffmpeg.exe')
+ffprobe_path = os.path.join(FFMPEG_DIR, 'ffprobe.exe')
+os.environ['PATH'] = FFMPEG_DIR + os.pathsep + os.environ.get('PATH', '')
+from pydub import AudioSegment
 
-
+AudioSegment.converter = ffmpeg_path
+AudioSegment.ffmpeg = ffmpeg_path
+AudioSegment.ffprobe = ffprobe_path
 bot = telebot.TeleBot(config.API_KEY)
-user_images = {}
+
 user_media = {}
 user_mode ={}
+
+
 
 @bot.message_handler(commands=['start','mode','image','audio', 'voice'])
 def start_message(message):
@@ -49,7 +58,7 @@ def set_quest(call):
 def get_voice_message(message):
     user_id = message.chat.id
     if user_mode.get(user_id) !='voice':
-        bot.send_message(message.chat.id, "Выберите voice")
+        bot.send_message(message.chat.id, "Выберите /voice")
         return
     try:
         file_id = message.voice.file_id
@@ -66,7 +75,7 @@ def get_voice_message(message):
         bot.send_message(message.chat.id, "Голосовое получено, нажмите для распознавания:", reply_markup=keyboard)
     except Exception as e:
         bot.send_message(message.chat.id, f'Ошибка получения гс:{e}')
-@bot.callback_query_handler(func=lambda call:call.data.startswith('voice',command='voice'))
+@bot.callback_query_handler(func=lambda call:call.data.startswith('voice'))
 def convert_voice_to_text(call):
     try:
         _, media_id = call.data.split(':', 1)
@@ -79,7 +88,7 @@ def convert_voice_to_text(call):
         bot.send_message(call.message.chat.id, "Отправь гс")
         return
     try:
-
+        bot.send_message(call.message.chat.id, "Конвертирую в текст...")
         audio = AudioSegment.from_file(BytesIO(voice_stream), format='ogg')
         wav_io = BytesIO()
         audio.export(wav_io, format='wav')
@@ -89,19 +98,25 @@ def convert_voice_to_text(call):
 
         with sr.AudioFile(wav_io) as source:
             audio_data = record.record(source)
-        text_record = record.recognize_google(audio_data,language='ru-RU')
-        bot.send_message(call.message.chat.id,f'{text_record}')
+
+        ru_text = record.recognize_google(audio_data,language=f'ru-RU')
+
+        bot.send_message(call.message.chat.id,f'{ru_text}')
+
         del user_media[voice_id]
 
     except Exception as e:
         bot.send_message(call.message.chat.id, f'Ошибка в конвертации{e}')
+    except UnknownHandler:
+        bot.send_message(call.message.chat.id, f'не распознал текст')
 @bot.message_handler(content_types=['audio', 'video'])
 def get_audio_message(message):
     user_id = message.chat.id
     if user_mode.get(user_id) != 'audio':
-        bot.send_message(message.chat.id, "Выберите audio")
+        bot.send_message(message.chat.id, "Выберите /audio")
         return
     try:
+        bot.send_message(user_id, "Конвертирую...")
         if message.content_type == 'audio':
             file_id = message.audio.file_id
             file_name = message.audio.file_name or'audio.file'
@@ -130,7 +145,7 @@ def get_audio_message(message):
 def get_image_messages(message):
     user_id = message.chat.id
     if user_mode.get(user_id) != 'image':
-        bot.send_message(message.chat.id,"Выбери режим image")
+        bot.send_message(message.chat.id,"Выбери режим /image")
         return
 
     file_info = bot.get_file(message.photo[-1].file_id)
@@ -139,7 +154,7 @@ def get_image_messages(message):
 
     image_id = str(uuid.uuid4())
 
-    user_images[image_id] = downloaded_file
+    user_media[image_id] = downloaded_file
 
     keyboard = types.InlineKeyboardMarkup()
     for fmt in ['png', 'jpeg', 'webp', 'pdf','ico','tga','ppm', 'tiff', 'bmp']:
@@ -159,7 +174,7 @@ def convert_audio(call):
     media_info = user_media.get(media_id)
 
     if not media_info:
-        bot.send_message(call.message.chat.id, "Сначала отправь видео или аудио.")
+        bot.send_message(call.message.chat.id, "Сначала отправь аудио.")
         return
 
     try:
@@ -181,7 +196,7 @@ def convert_audio(call):
         del user_media[media_id]
         print(f"[DEBUG] Обрабатываем callback: {fmt=} {media_id=}")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f'Ошибка в конвертации.{str(e)}')
+        bot.send_message(call.message.chat.id, f'Ошибка в конвертации. Слишком большой файл')
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('image'))
@@ -194,7 +209,7 @@ def convert_image(call):
         return
 
 
-    image_data = user_images.get(image_id)
+    image_data = user_media.get(image_id)
 
     if not image_data:
         bot.send_message(call.message.chat.id, "Сначала отправь изображение.")
@@ -209,6 +224,6 @@ def convert_image(call):
     bot.send_message(call.message.chat.id, "Вот твоё изображение!")
 
     print(f"[DEBUG] Обрабатываем callback: {fmt=} {image_id=}")
-    del user_images[image_id]
+    del user_media[image_id]
 
 bot.infinity_polling()
